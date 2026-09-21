@@ -1,0 +1,7 @@
+{
+  "task": "easy",
+  "condition": "oracle",
+  "seed": 2,
+  "success_distance": 0.05,
+  "first_success_timestep": 18291
+}

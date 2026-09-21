@@ -1,0 +1,11 @@
+{
+  "task": "hard",
+  "condition": "oracle",
+  "seed": 3,
+  "timesteps": 500000,
+  "duration_seconds": 359.0,
+  "reward_mode": "full",
+  "shaping_mode": "none",
+  "eta": 0.0,
+  "normalize_advantage": true
+}
