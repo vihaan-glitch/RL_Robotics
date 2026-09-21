@@ -1,0 +1,7 @@
+{
+  "task": "easy",
+  "condition": "bsrs_d_e1",
+  "seed": 0,
+  "success_distance": 0.05,
+  "first_success_timestep": 64837
+}

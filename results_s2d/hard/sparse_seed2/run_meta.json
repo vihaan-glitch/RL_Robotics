@@ -1,0 +1,11 @@
+{
+  "task": "hard",
+  "condition": "sparse",
+  "seed": 2,
+  "timesteps": 500000,
+  "duration_seconds": 376.6,
+  "reward_mode": "sparse",
+  "shaping_mode": "none",
+  "eta": 0.0,
+  "normalize_advantage": true
+}

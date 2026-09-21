@@ -1,0 +1,10 @@
+{
+  "task": "hard",
+  "condition": "her_final",
+  "seed": 0,
+  "timesteps": 500000,
+  "duration_seconds": 394.5,
+  "reward_mode": "sparse",
+  "her_strategy": "final",
+  "normalize_advantage": true
+}

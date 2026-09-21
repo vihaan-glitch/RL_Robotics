@@ -7,14 +7,17 @@ __pycache__/
 dist/
 build/
 
-# Virtualenvs
+# Virtualenvs (pybullet-env/ is a committed legacy venv; untrack it with
+# `git rm -r --cached pybullet-env` — this line then keeps it out)
 .venv/
 venv*/
 env/
+pybullet-env/
 
 # Training artefacts (large, regenerable)
 models/
 logs/
+ppo_arm_reach.zip
 
 # Heavy per-run artefacts inside results dirs (regenerable from training).
 # The small numeric results (*.csv, *.json, evaluations.npz) ARE tracked.
@@ -22,13 +25,26 @@ results*/**/final_model.zip
 results*/**/best_model/
 results*/**/vec_normalize.pkl
 results*/**/tensorboard/
+# Exception: the one checkpoint the paper's P2 single-update diagnostic loads
+# (diagnostics/diag_lr_confound.py, diag_multistep.py) — ~170 KB total.
+!results_s2d/easy/sparse_seed0/final_model.zip
+!results_s2d/easy/sparse_seed0/vec_normalize.pkl
 
-# Ablation training console logs (regenerable)
+# Console logs (regenerable)
 results_ablation_*.log
+results_s2d_run.log
 MUJOCO_LOG.TXT
+
+# Local working files (paper drafts, review renders)
+output/
+tmp/
 
 # Editor / OS
 .DS_Store
 *.swp
 .idea/
 .vscode/
+
+# Local tooling
+.claude/
+.pytest_cache/

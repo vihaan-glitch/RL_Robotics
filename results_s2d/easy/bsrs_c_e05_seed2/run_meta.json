@@ -1,0 +1,11 @@
+{
+  "task": "easy",
+  "condition": "bsrs_c_e05",
+  "seed": 2,
+  "timesteps": 500000,
+  "duration_seconds": 264.9,
+  "reward_mode": "sparse",
+  "shaping_mode": "bsrs_coupled",
+  "eta": 0.5,
+  "normalize_advantage": true
+}

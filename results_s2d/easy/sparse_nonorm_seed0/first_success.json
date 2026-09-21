@@ -1,0 +1,7 @@
+{
+  "task": "easy",
+  "condition": "sparse_nonorm",
+  "seed": 0,
+  "success_distance": 0.05,
+  "first_success_timestep": 25061
+}
