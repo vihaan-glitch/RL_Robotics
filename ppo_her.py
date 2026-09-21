@@ -8,7 +8,16 @@ The reaching goal is encoded in the observation itself:
     obs = [ joint_pos(7) | joint_vel(7) | target(3) | ee(3) | distance(1) ]
 so relabeling a transition = overwriting the target dims with an achieved
 end-effector position g′, recomputing the distance feature, and recomputing the
-sparse reward (+100 & terminal when ‖ee − g′‖ < 0.05).
+goal-dependent reward (+100 & terminal when ‖ee − g′‖ < 0.05).
+
+Relabeled reward = original reward + (100 if the relabeled goal is reached).
+Only failed episodes are relabeled, and a failed episode's original rewards
+contain no goal-dependent success term, so the original reward is exactly the
+goal-independent part — the hard task's −10 collision penalty (0 on the easy
+task). Before this fix the relabeled reward was the success term alone, which
+dropped collision penalties on relabeled transitions; `relabel_goal_independent_reward=False`
+reproduces that behaviour (used for results_s2d/hard/her_final_*, commit 962dffb).
+Easy-task results are identical under both settings.
 
 Why a custom collect_rollouts + train
 -------------------------------------
@@ -55,7 +64,8 @@ class HERPPO(PPO):
     """PPO with on-policy hindsight relabeling of failed episodes."""
 
     def __init__(self, *args, her_strategy: str = "final",
-                 progress_csv: str | None = None, **kwargs):
+                 progress_csv: str | None = None,
+                 relabel_goal_independent_reward: bool = True, **kwargs):
         if her_strategy not in VALID_HER_STRATEGIES:
             raise ValueError(
                 f"Unknown her_strategy={her_strategy!r}. "
@@ -63,6 +73,7 @@ class HERPPO(PPO):
             )
         self.her_strategy = her_strategy
         self.her_k = 4 if her_strategy == "future_k4" else 1
+        self.relabel_goal_independent_reward = bool(relabel_goal_independent_reward)
         self._progress_csv_path = progress_csv
         self._progress_file = None
         self._progress_writer = None
@@ -185,7 +196,7 @@ class HERPPO(PPO):
         # ── Build the relabeled augmentation ───────────────────────────────────
         n_original = T * n_envs
         relabeled = self._build_relabeled_batch(
-            raw_obs, actions_a, dones_a, trunc_a, term_raw, cap=n_original
+            raw_obs, actions_a, rewards_a, dones_a, trunc_a, term_raw, cap=n_original
         )
 
         # ── Flatten original + relabeled into one combined batch ───────────────
@@ -213,7 +224,7 @@ class HERPPO(PPO):
     # ══════════════════════════════════════════════════════════════════════════
     #  THE RELABELING CODE PATH
     # ══════════════════════════════════════════════════════════════════════════
-    def _build_relabeled_batch(self, raw_obs, actions_a, dones_a, trunc_a,
+    def _build_relabeled_batch(self, raw_obs, actions_a, rewards_a, dones_a, trunc_a,
                                term_raw, cap: int) -> dict:
         """
         For every COMPLETED, FAILED (truncated) episode, produce relabeled
@@ -222,7 +233,7 @@ class HERPPO(PPO):
         """
         T, n_envs, obs_dim = raw_obs.shape
         out_obs, out_act = [], []
-        out_val, out_logp, out_adv, out_ret = [], [], [], []
+        out_val, out_logp, out_adv, out_ret, out_rew = [], [], [], [], []
         built = 0
 
         for e in range(n_envs):
@@ -254,17 +265,18 @@ class HERPPO(PPO):
                         if built >= cap:
                             break
                         traj = self._relabel_episode(raw_obs[:, e, :], actions_a[:, e, :],
-                                                     ee_next, start, f, g)
+                                                     rewards_a[:, e], ee_next, start, f, g)
                         if traj is None:
                             continue
                         L = len(traj["adv"])
                         if built + L > cap:      # respect the ≤1× cap exactly
                             L = cap - built
-                            for k in ("obs", "actions", "values", "logp", "adv", "ret"):
+                            for k in ("obs", "actions", "values", "logp", "adv", "ret", "rewards"):
                                 traj[k] = traj[k][:L]
                         out_obs.append(traj["obs"]); out_act.append(traj["actions"])
                         out_val.append(traj["values"]); out_logp.append(traj["logp"])
                         out_adv.append(traj["adv"]); out_ret.append(traj["ret"])
+                        out_rew.append(traj["rewards"])
                         built += L
                 start = t + 1
                 if built >= cap:
@@ -278,14 +290,22 @@ class HERPPO(PPO):
             "logp": np.concatenate(out_logp, 0) if out_logp else np.zeros(0),
             "adv": np.concatenate(out_adv, 0) if out_adv else np.zeros(0),
             "ret": np.concatenate(out_ret, 0) if out_ret else np.zeros(0),
+            "rewards": np.concatenate(out_rew, 0) if out_rew else np.zeros(0),
         }
 
-    def _relabel_episode(self, raw_e, act_e, ee_next, start, goal_step, g) -> dict | None:
+    def _relabel_episode(self, raw_e, act_e, rew_e, ee_next, start, goal_step, g) -> dict | None:
         """
         Relabel transitions [start .. goal_step] with goal g, ending in success at
         goal_step. Returns a GAE'd trajectory (normalized obs, actions, old V̂/logp,
-        advantages, returns) or None if degenerate.
+        advantages, returns, rewards) or None if degenerate.
+
+        `rew_e` holds the ORIGINAL rewards of this (failed) episode; they are the
+        goal-independent reward component and are kept under the new goal.
         """
+        # A failed episode has no original success, so its rewards must be free of
+        # the goal-dependent +100 term (sparse mode: they are 0 or −10·collision).
+        assert np.all(rew_e[start:goal_step + 1] < 100.0), \
+            "relabeling a failed episode whose original rewards contain a success term"
         rel_raw, rel_act, rel_rew, rel_done = [], [], [], []
         for tau in range(start, goal_step + 1):
             s = raw_e[tau].copy()
@@ -295,7 +315,9 @@ class HERPPO(PPO):
             achieved = np.linalg.norm(ee_next[tau] - g) < SUCCESS_DISTANCE
             rel_raw.append(s)
             rel_act.append(act_e[tau])
-            rel_rew.append(100.0 if achieved else 0.0)  # sparse reward under g
+            goal_reward = 100.0 if achieved else 0.0             # sparse reward under g
+            keep = rew_e[tau] if self.relabel_goal_independent_reward else 0.0
+            rel_rew.append(goal_reward + keep)                   # + collision penalty
             rel_done.append(achieved)
             if achieved:                            # terminate at first achievement
                 break
@@ -328,7 +350,8 @@ class HERPPO(PPO):
                              rel_done.reshape(L, 1), self.gamma, self.gae_lambda).reshape(L)
         ret = adv + values
         return {"obs": norm.astype(np.float32), "actions": rel_act,
-                "values": values, "logp": logp, "adv": adv, "ret": ret}
+                "values": values, "logp": logp, "adv": adv, "ret": ret,
+                "rewards": rewards.reshape(L)}
 
     # ══════════════════════════════════════════════════════════════════════════
     #  PPO update over the combined batch (split instrumentation → progress.csv)

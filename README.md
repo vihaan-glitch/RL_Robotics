@@ -54,11 +54,20 @@ project's first commit (Jan 2026) used PyBullet and was replaced in `3cec257`.
   distance features are recomputed on raw observations, then normalized with
   the rollout's obs statistics; V̂ and log π_old are recomputed with the
   pre-update network. Augmentation is capped at 1× the original batch.
-  Relabeled rewards are sparse (+100 / 0) and do not include the hard task's
-  collision penalty.
+  A relabeled reward is the original reward plus +100 at the relabeled goal.
+  That keeps the hard task's −10 collision penalty, which does not depend on
+  the goal.
+  - **Hard-task caveat:** the committed `results_s2d/hard/her_final_*` runs
+    predate this fix and used the success term alone, dropping the penalty on
+    relabeled transitions. `relabel_goal_independent_reward=False` reproduces
+    them. They are to be re-run.
+  - Easy-task results are identical under both settings (no collisions).
 - `tests_shaping.py` — verification suite (≈5 s): T1 telescoping, T2 coupled
   identity A′ = (1+η)A − ηR^{γλ} including truncations, T3 truncation
   bootstrap, T4 decoupled residuals. All pass at ~1e-15.
+- `tests_her.py` — relabeling-reward checks (≈10 s): the collision penalty
+  survives relabeling, the legacy flag reproduces the pre-fix behaviour, and
+  batches are identical when there are no collisions.
 
 ### Conditions → code path → settings
 
@@ -88,6 +97,7 @@ that file is the source of truth.
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python tests_shaping.py                 # identity checks, ~5 s
+python tests_her.py                     # HER relabeling-reward checks, ~10 s
 python run_s2d_study.py --yes           # 110 runs, ~10 CPU-hours, resumable
 python evaluate_s2d.py                  # 50 deterministic episodes/run -> results_s2d/eval_s2d*.csv
 python figures_s2d.py                   # -> figures_s2d/F1..F7 + captions.md
